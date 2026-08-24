@@ -38,6 +38,33 @@ namespace GravityLab
             set => m_Gravity = value;
         }
 
+        public float range => m_Range;
+
+        public float minDistance => m_MinDistance;
+
+        public float maxAcceleration => m_MaxAcceleration;
+
+        /// <summary>
+        /// Acceleration this attractor would apply to a body at the given world position,
+        /// using the same maths as <see cref="FixedUpdate"/>. Returns zero when the point is
+        /// out of range. Lets callers such as force visualisers report the real value
+        /// without duplicating the falloff.
+        /// </summary>
+        public Vector3 GetAccelerationAt(Vector3 worldPosition)
+        {
+            var offset = transform.position - worldPosition;
+            var distance = offset.magnitude;
+
+            if (distance > m_Range || distance < 1e-4f)
+                return Vector3.zero;
+
+            var effectiveDistance = Mathf.Max(distance, m_MinDistance);
+            var acceleration = m_Gravity / (effectiveDistance * effectiveDistance);
+            acceleration = Mathf.Min(acceleration, m_MaxAcceleration);
+
+            return offset / distance * acceleration;
+        }
+
         void OnEnable()
         {
             Rescan();
@@ -47,8 +74,6 @@ namespace GravityLab
         {
             if (m_RescanInterval <= 0f || Time.time >= m_NextScanTime)
                 Rescan();
-
-            var center = transform.position;
 
             for (var i = m_Bodies.Count - 1; i >= 0; i--)
             {
@@ -64,19 +89,14 @@ namespace GravityLab
                 if (body.isKinematic)
                     continue;
 
-                var offset = center - body.worldCenterOfMass;
-                var distance = offset.magnitude;
+                // Shared with GetAccelerationAt so visualisers report exactly what is applied.
+                var acceleration = GetAccelerationAt(body.worldCenterOfMass);
 
-                if (distance > m_Range || distance < 1e-4f)
+                if (acceleration == Vector3.zero)
                     continue;
 
-                // Clamp the radius so a body at the centre does not receive infinite force.
-                var effectiveDistance = Mathf.Max(distance, m_MinDistance);
-                var acceleration = m_Gravity / (effectiveDistance * effectiveDistance);
-                acceleration = Mathf.Min(acceleration, m_MaxAcceleration);
-
                 // Acceleration mode ignores mass, so heavy and light objects fall alike.
-                body.AddForce(offset / distance * acceleration, ForceMode.Acceleration);
+                body.AddForce(acceleration, ForceMode.Acceleration);
             }
         }
 
