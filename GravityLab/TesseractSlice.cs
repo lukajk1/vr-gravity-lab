@@ -61,6 +61,33 @@ namespace GravityLab
         [Tooltip("Smallest rotation, in degrees, worth rebuilding for. Larger values skip work when the cube is barely moving.")]
         float m_AngleEpsilon = 0.05f;
 
+        [Header("Cell colours")]
+        [SerializeField]
+        [Tooltip("Tint each face by the tesseract cell it lies in. A cell keeps its colour as the cube turns, so a face fading dark is that cell sweeping away through w.")]
+        bool m_ColourByCell = true;
+
+        [SerializeField]
+        [Tooltip("Colours for the +X, +Y and +Z cells. Their negative twins use the same hue darkened.")]
+        Color[] m_AxisColours =
+        {
+            new Color(1f, 0.35f, 0.3f),
+            new Color(0.4f, 1f, 0.45f),
+            new Color(0.4f, 0.6f, 1f),
+        };
+
+        [SerializeField]
+        [Tooltip("How much darker a negative cell is than its positive twin")]
+        [Range(0f, 1f)]
+        float m_NegativeCellDarkening = 0.45f;
+
+        [SerializeField]
+        [Tooltip("Colour of the +w cell, the one facing along the fourth axis")]
+        Color m_PositiveWColour = Color.white;
+
+        [SerializeField]
+        [Tooltip("Colour of the -w cell, the one facing away along the fourth axis")]
+        Color m_NegativeWColour = new Color(0.12f, 0.12f, 0.14f);
+
         [SerializeField]
         [Tooltip("Log the section's vertex and triangle count whenever its topology changes")]
         bool m_LogTopologyChanges;
@@ -74,6 +101,11 @@ namespace GravityLab
 
         readonly Vector4[] m_Rotated = new Vector4[16];
         readonly List<Vector3> m_SectionPoints = new List<Vector3>(32);
+
+        // Which of the 8 cells each section point lies in, as a bit per cell. A point sits on
+        // an edge, and an edge borders every cell whose fixed coordinate both its ends share.
+        readonly List<int> m_PointCells = new List<int>(32);
+        readonly List<Color> m_Colours = new List<Color>(128);
         readonly List<Vector3> m_Vertices = new List<Vector3>(128);
         readonly List<int> m_Triangles = new List<int>(256);
 
@@ -211,6 +243,49 @@ namespace GravityLab
             }
         }
 
+        /// <summary>
+        /// Returns a bit per tesseract cell the given edge lies in. Cells are numbered as two
+        /// per axis, negative then positive, so axis a contributes bits 2a and 2a+1. An edge
+        /// changes exactly one coordinate, so it lies in the cells of the other three.
+        /// </summary>
+        static int CellsForEdge(int cornerA, int cornerB)
+        {
+            var cells = 0;
+
+            for (var axis = 0; axis < 4; axis++)
+            {
+                var bit = 1 << axis;
+
+                // The axis this edge runs along differs between its ends, so it borders
+                // neither of that axis's cells.
+                if (((cornerA ^ cornerB) & bit) != 0)
+                    continue;
+
+                cells |= 1 << (axis * 2 + ((cornerA & bit) != 0 ? 1 : 0));
+            }
+
+            return cells;
+        }
+
+        /// <summary>
+        /// Colour for one cell index, as numbered by <see cref="CellsForEdge"/>. The three
+        /// ordinary axes take their own hue, darkened on the negative side; the w cells are
+        /// the extremes of light and dark, so a face sweeping through the fourth dimension
+        /// reads as a change in brightness.
+        /// </summary>
+        Color ColourForCell(int cell)
+        {
+            var axis = cell / 2;
+            var positive = (cell & 1) != 0;
+
+            if (axis == 3)
+                return positive ? m_PositiveWColour : m_NegativeWColour;
+
+            var baseColour = axis < m_AxisColours.Length ? m_AxisColours[axis] : Color.grey;
+
+            return positive ? baseColour : baseColour * (1f - m_NegativeCellDarkening);
+        }
+
         void Rebuild()
         {
             RotateCorners();
@@ -224,6 +299,10 @@ namespace GravityLab
                 // SetVertices/SetTriangles with a List avoids the array copy that the
                 // array overloads force, and Clear already reset the previous contents.
                 m_Mesh.SetVertices(m_Vertices);
+
+                if (m_ColourByCell && m_Colours.Count == m_Vertices.Count)
+                    m_Mesh.SetColors(m_Colours);
+
                 m_Mesh.SetTriangles(m_Triangles, 0, false);
                 m_Mesh.RecalculateNormals();
                 m_Mesh.RecalculateBounds();
@@ -281,11 +360,14 @@ namespace GravityLab
         void FindSectionPoints()
         {
             m_SectionPoints.Clear();
+            m_PointCells.Clear();
 
             for (var e = 0; e < m_EdgeA.Count; e++)
             {
-                var p = m_Rotated[m_EdgeA[e]];
-                var q = m_Rotated[m_EdgeB[e]];
+                var indexA = m_EdgeA[e];
+                var indexB = m_EdgeB[e];
+                var p = m_Rotated[indexA];
+                var q = m_Rotated[indexB];
 
                 var dp = p.w - m_SliceW;
                 var dq = q.w - m_SliceW;
@@ -304,19 +386,30 @@ namespace GravityLab
                 var point3 = new Vector3(point.x, point.y, point.z);
 
                 // Several edges can cross at the same corner; keep one copy so the hull is clean.
-                var duplicate = false;
+                // An edge lies in every cell whose coordinate is the same at both ends, and
+                // the crossing point inherits that membership.
+                var cells = CellsForEdge(indexA, indexB);
 
-                foreach (var existing in m_SectionPoints)
+                var duplicate = -1;
+
+                for (var existing = 0; existing < m_SectionPoints.Count; existing++)
                 {
-                    if ((existing - point3).sqrMagnitude < 1e-8f)
+                    if ((m_SectionPoints[existing] - point3).sqrMagnitude < 1e-8f)
                     {
-                        duplicate = true;
+                        duplicate = existing;
                         break;
                     }
                 }
 
-                if (!duplicate)
-                    m_SectionPoints.Add(point3);
+                if (duplicate >= 0)
+                {
+                    // A corner shared by several edges belongs to all their cells.
+                    m_PointCells[duplicate] |= cells;
+                    continue;
+                }
+
+                m_SectionPoints.Add(point3);
+                m_PointCells.Add(cells);
             }
         }
 
@@ -329,6 +422,7 @@ namespace GravityLab
         {
             m_Vertices.Clear();
             m_Triangles.Clear();
+            m_Colours.Clear();
             m_Planes.Clear();
 
             if (m_SectionPoints.Count < 4)
@@ -420,14 +514,42 @@ namespace GravityLab
             {
                 m_FacePoints.Clear();
 
+                // A hull face lies in whichever cell all of its points share, so intersect
+                // their memberships as they are collected.
+                var sharedCells = -1;
+
                 for (var m = 0; m < count; m++)
                 {
                     if (Mathf.Abs(Vector3.Dot(plane.normal, m_SectionPoints[m]) - plane.offset) < 1e-4f)
+                    {
                         m_FacePoints.Add(m_SectionPoints[m]);
+                        sharedCells = sharedCells < 0 ? m_PointCells[m] : sharedCells & m_PointCells[m];
+                    }
                 }
 
                 if (m_FacePoints.Count < 3)
                     continue;
+
+                var faceColour = Color.white;
+
+                if (m_ColourByCell)
+                {
+                    // Lowest set bit is the cell this face sits in. A face on more than one
+                    // is degenerate, so taking the first is enough.
+                    var cell = -1;
+
+                    for (var bit = 0; bit < 8; bit++)
+                    {
+                        if (sharedCells > 0 && (sharedCells & (1 << bit)) != 0)
+                        {
+                            cell = bit;
+                            break;
+                        }
+                    }
+
+                    if (cell >= 0)
+                        faceColour = ColourForCell(cell);
+                }
 
                 var faceCentre = Vector3.zero;
 
@@ -455,6 +577,10 @@ namespace GravityLab
                     m_Vertices.Add(faceCentre);
                     m_Vertices.Add(m_FacePoints[f]);
                     m_Vertices.Add(m_FacePoints[next]);
+
+                    m_Colours.Add(faceColour);
+                    m_Colours.Add(faceColour);
+                    m_Colours.Add(faceColour);
 
                     var baseIndex = m_Vertices.Count - 3;
                     m_Triangles.Add(baseIndex);

@@ -11,6 +11,9 @@ Shader "GravityLab/Fresnel Lit"
         _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
 
         [Space(10)]
+        [Toggle(_VERTEXCOLOR_ON)] _VertexColorEnabled("Use Vertex Colors", Float) = 0
+
+        [Space(10)]
         [Toggle(_FRESNEL_ON)] _FresnelEnabled("Fresnel Enabled", Float) = 1
         [HDR] _FresnelColor("Fresnel Color", Color) = (0.4, 0.7, 1.0, 1.0)
         _FresnelPower("Fresnel Power", Range(0.25, 16.0)) = 3.0
@@ -67,6 +70,9 @@ Shader "GravityLab/Fresnel Lit"
             // Toggling this compiles the rim term out entirely rather than branching.
             #pragma shader_feature_local_fragment _FRESNEL_ON
 
+            // Vertex colours cost one interpolator, so compile them out when unused.
+            #pragma shader_feature_local _VERTEXCOLOR_ON
+
             #pragma multi_compile _ LIGHTMAP_ON
             #pragma multi_compile _ DYNAMICLIGHTMAP_ON
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
@@ -81,6 +87,7 @@ Shader "GravityLab/Fresnel Lit"
                 half4  _BaseColor;
                 half   _Smoothness;
                 half   _Metallic;
+                half   _VertexColorEnabled;
                 half   _FresnelEnabled;
                 half4  _FresnelColor;
                 half   _FresnelPower;
@@ -97,6 +104,9 @@ Shader "GravityLab/Fresnel Lit"
                 float3 normalOS   : NORMAL;
                 float2 uv         : TEXCOORD0;
                 float2 lightmapUV : TEXCOORD1;
+            #ifdef _VERTEXCOLOR_ON
+                half4  color      : COLOR;
+            #endif
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -107,6 +117,9 @@ Shader "GravityLab/Fresnel Lit"
                 float3 positionWS  : TEXCOORD1;
                 half3  normalWS    : TEXCOORD2;
                 half   fogFactor   : TEXCOORD3;
+            #ifdef _VERTEXCOLOR_ON
+                half4  color       : COLOR;
+            #endif
                 DECLARE_LIGHTMAP_OR_SH(lightmapUV, vertexSH, 4);
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
@@ -129,6 +142,10 @@ Shader "GravityLab/Fresnel Lit"
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
                 output.fogFactor = ComputeFogFactor(positionInputs.positionCS.z);
 
+            #ifdef _VERTEXCOLOR_ON
+                output.color = input.color;
+            #endif
+
                 OUTPUT_LIGHTMAP_UV(input.lightmapUV, unity_LightmapST, output.lightmapUV);
                 OUTPUT_SH(output.normalWS, output.vertexSH);
 
@@ -143,6 +160,11 @@ Shader "GravityLab/Fresnel Lit"
                 // Surface colour multiplies the texture, the standard arrangement.
                 half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
                 half3 albedo = baseSample.rgb * _BaseColor.rgb;
+
+            #ifdef _VERTEXCOLOR_ON
+                // Multiplied like any other albedo term, so the surface colour still tints it.
+                albedo *= input.color.rgb;
+            #endif
 
                 half3 normalWS = normalize(input.normalWS);
                 half3 viewDirWS = normalize(GetWorldSpaceViewDir(input.positionWS));
@@ -208,6 +230,7 @@ Shader "GravityLab/Fresnel Lit"
                 half4  _BaseColor;
                 half   _Smoothness;
                 half   _Metallic;
+                half   _VertexColorEnabled;
                 half   _FresnelEnabled;
                 half4  _FresnelColor;
                 half   _FresnelPower;
@@ -244,6 +267,7 @@ Shader "GravityLab/Fresnel Lit"
                 half4  _BaseColor;
                 half   _Smoothness;
                 half   _Metallic;
+                half   _VertexColorEnabled;
                 half   _FresnelEnabled;
                 half4  _FresnelColor;
                 half   _FresnelPower;
@@ -279,6 +303,7 @@ Shader "GravityLab/Fresnel Lit"
                 half4  _BaseColor;
                 half   _Smoothness;
                 half   _Metallic;
+                half   _VertexColorEnabled;
                 half   _FresnelEnabled;
                 half4  _FresnelColor;
                 half   _FresnelPower;
