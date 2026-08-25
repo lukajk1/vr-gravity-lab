@@ -79,8 +79,8 @@ namespace GravityLab
         Color m_GravityColor = new Color(0.2f, 0.6f, 1f);
 
         [SerializeField]
-        [Tooltip("Colour of the pull from each attractor")]
-        Color m_AttractorColor = Color.black;
+        [Tooltip("Colour of the pull from each attractor. Yellow reads clearly against both the dark scene and the pale objects.")]
+        Color m_AttractorColor = new Color(1f, 0.85f, 0.15f);
 
         [SerializeField]
         [Tooltip("Metres drawn per unit of acceleration. Purely visual scaling.")]

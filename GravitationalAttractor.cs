@@ -10,7 +10,7 @@ namespace GravityLab
     public class GravitationalAttractor : MonoBehaviour
     {
         [SerializeField]
-        [Tooltip("Acceleration at the attractor's surface, in m/s^2. Earth's surface is 9.81, so 19.62 is 2G.")]
+        [Tooltip("Acceleration at the attractor's surface, in m/s^2. Earth's surface is 9.81, so 19.62 is 2G. Negative values push bodies away instead of pulling them in.")]
         float m_SurfaceGravity = 19.62f;
 
         [SerializeField]
@@ -82,7 +82,11 @@ namespace GravityLab
             // Clamp at the surface, so the pull peaks there instead of blowing up at the centre.
             var effectiveDistance = Mathf.Max(distance, m_SurfaceRadius);
             var acceleration = gravitationalParameter / (effectiveDistance * effectiveDistance);
-            acceleration = Mathf.Min(acceleration, m_MaxAcceleration);
+
+            // Clamp the magnitude, not the signed value: a negative surface gravity makes
+            // this a repulsor, and Mathf.Min on a negative number would let it through
+            // unlimited instead of capping it.
+            acceleration = Mathf.Sign(acceleration) * Mathf.Min(Mathf.Abs(acceleration), m_MaxAcceleration);
 
             return offset / distance * acceleration;
         }
