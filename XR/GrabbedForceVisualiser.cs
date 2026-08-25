@@ -28,6 +28,14 @@ namespace GravityLab
             public Vector3 smoothedDirection;
             public float smoothedLength;
             public float lengthVelocity;
+
+            public Vector3 smoothedOrigin;
+            public Vector3 originVelocity;
+
+            // Kept between frames so the arrowhead plane drifts instead of snapping when
+            // the shaft swings past the axis used to derive it.
+            public Vector3 barbAxis;
+
             public bool initialised;
 
             public void SetEnabled(bool value)
@@ -86,6 +94,10 @@ namespace GravityLab
         [SerializeField]
         [Tooltip("Seconds for the arrow length to catch up as the force changes magnitude")]
         float m_LengthSmoothTime = 0.2f;
+
+        [SerializeField]
+        [Tooltip("Seconds for the arrow's tail to catch up to the object. Smooths out the jitter of a tumbling body; zero pins the tail rigidly.")]
+        float m_OriginSmoothTime = 0.08f;
 
         [SerializeField]
         [Tooltip("Length of each arrowhead barb, as a fraction of the shaft length")]
@@ -294,6 +306,9 @@ namespace GravityLab
             line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             line.receiveShadows = false;
             line.material = ResolveMaterial();
+
+            // Below the labels' 100, so text still wins where the two overlap.
+            line.sortingOrder = 50;
             line.startColor = color;
             line.endColor = color;
             line.enabled = false;
@@ -308,9 +323,12 @@ namespace GravityLab
 
             if (m_RuntimeMaterial == null)
             {
-                // Unlit so the vectors read as diagram lines rather than lit geometry, and
-                // so black stays black instead of picking up scene lighting.
-                var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
+                // The overlay variant ignores depth, so an arrow stays visible through the
+                // object it describes. Unlit either way, so black stays black rather than
+                // picking up scene lighting.
+                var shader = Shader.Find("GravityLab/Line Overlay")
+                    ?? Shader.Find("Universal Render Pipeline/Unlit")
+                    ?? Shader.Find("Unlit/Color");
                 m_RuntimeMaterial = new Material(shader);
             }
 
