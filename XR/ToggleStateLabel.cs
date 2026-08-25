@@ -11,8 +11,12 @@ namespace GravityLab
     public class ToggleStateLabel : MonoBehaviour
     {
         [SerializeField]
-        [Tooltip("Toggle to report on. Leave empty to find one on this object or a parent.")]
+        [Tooltip("Attractor toggle to report on. Leave empty to find one on this object or a parent.")]
         AttractorToggle m_Toggle;
+
+        [SerializeField]
+        [Tooltip("Global gravity toggle to report on instead. Set this OR the attractor toggle, not both.")]
+        GlobalGravityToggle m_GravityToggle;
 
         [SerializeField]
         [Tooltip("Text component to write into. Leave empty to use one in this hierarchy.")]
@@ -40,7 +44,9 @@ namespace GravityLab
 
         void Awake()
         {
-            if (m_Toggle == null)
+            // Only auto-find an attractor toggle when no gravity toggle was assigned, so a
+            // gravity button in a scene that also has an attractor does not bind the wrong one.
+            if (m_Toggle == null && m_GravityToggle == null)
                 m_Toggle = GetComponentInParent<AttractorToggle>();
 
             if (m_Text == null)
@@ -49,6 +55,13 @@ namespace GravityLab
 
         void OnEnable()
         {
+            if (m_GravityToggle != null)
+            {
+                m_GravityToggle.onToggled.AddListener(Refresh);
+                Refresh(m_GravityToggle.isOn);
+                return;
+            }
+
             if (m_Toggle == null)
                 return;
 
@@ -60,6 +73,9 @@ namespace GravityLab
 
         void OnDisable()
         {
+            if (m_GravityToggle != null)
+                m_GravityToggle.onToggled.RemoveListener(Refresh);
+
             if (m_Toggle != null)
                 m_Toggle.onToggled.RemoveListener(Refresh);
         }
