@@ -70,9 +70,9 @@ namespace GravityLab
         [Tooltip("Colours for the +X, +Y and +Z cells. Their negative twins use the same hue darkened.")]
         Color[] m_AxisColours =
         {
-            new Color(1f, 0.35f, 0.3f),
-            new Color(0.4f, 1f, 0.45f),
-            new Color(0.4f, 0.6f, 1f),
+            new Color(1f, 0.05f, 0.02f),
+            new Color(0.05f, 1f, 0.08f),
+            new Color(0.06f, 0.2f, 1f),
         };
 
         [SerializeField]
@@ -86,7 +86,11 @@ namespace GravityLab
 
         [SerializeField]
         [Tooltip("Colour of the -w cell, the one facing away along the fourth axis")]
-        Color m_NegativeWColour = new Color(0.12f, 0.12f, 0.14f);
+        Color m_NegativeWColour = new Color(0.06f, 0.06f, 0.09f);
+
+        [SerializeField]
+        [Tooltip("Multiplies every cell colour. Above 1 pushes them past white, which survives the lighting and rim without looking washed out.")]
+        float m_ColourGain = 1.6f;
 
         [SerializeField]
         [Tooltip("Log the section's vertex and triangle count whenever its topology changes")]
@@ -279,11 +283,29 @@ namespace GravityLab
             var positive = (cell & 1) != 0;
 
             if (axis == 3)
-                return positive ? m_PositiveWColour : m_NegativeWColour;
+                return Boost(positive ? m_PositiveWColour : m_NegativeWColour);
 
             var baseColour = axis < m_AxisColours.Length ? m_AxisColours[axis] : Color.grey;
 
-            return positive ? baseColour : baseColour * (1f - m_NegativeCellDarkening);
+            if (!positive)
+            {
+                // Scale the channels only. Multiplying the whole Color would dim alpha too,
+                // which is meaningless on an opaque surface and confusing to read back.
+                var dim = 1f - m_NegativeCellDarkening;
+                baseColour = new Color(baseColour.r * dim, baseColour.g * dim, baseColour.b * dim, baseColour.a);
+            }
+
+            return Boost(baseColour);
+        }
+
+        /// <summary>
+        /// Applies the colour gain, again leaving alpha alone. Values above one are kept
+        /// rather than clamped, so a bright cell still reads as its own hue once the rim and
+        /// scene lighting have been added on top.
+        /// </summary>
+        Color Boost(Color colour)
+        {
+            return new Color(colour.r * m_ColourGain, colour.g * m_ColourGain, colour.b * m_ColourGain, colour.a);
         }
 
         void Rebuild()
