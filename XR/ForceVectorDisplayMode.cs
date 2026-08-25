@@ -78,11 +78,15 @@ namespace GravityLab
             showAll = value;
             showAllChanged?.Invoke(value);
 
-            // Every instance raises its own event, so each button's label stays in step even
-            // when several buttons drive the same shared flag.
+            // Raise our own event first: this instance may not be registered yet if
+            // SetEnabled is called before OnEnable, and a label bound to it must still hear.
+            m_OnToggled?.Invoke(value);
+
+            // Then every other instance, so several buttons driving the same shared flag all
+            // keep their labels in step.
             foreach (var instance in s_Instances)
             {
-                if (instance != null)
+                if (instance != null && instance != this)
                     instance.m_OnToggled?.Invoke(value);
             }
         }

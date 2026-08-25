@@ -19,6 +19,10 @@ namespace GravityLab
         GlobalGravityToggle m_GravityToggle;
 
         [SerializeField]
+        [Tooltip("Force vector display mode to report on instead. Set only one of the three sources.")]
+        ForceVectorDisplayMode m_DisplayMode;
+
+        [SerializeField]
         [Tooltip("Text component to write into. Leave empty to use one in this hierarchy.")]
         TMP_Text m_Text;
 
@@ -46,7 +50,7 @@ namespace GravityLab
         {
             // Only auto-find an attractor toggle when no gravity toggle was assigned, so a
             // gravity button in a scene that also has an attractor does not bind the wrong one.
-            if (m_Toggle == null && m_GravityToggle == null)
+            if (m_Toggle == null && m_GravityToggle == null && m_DisplayMode == null)
                 m_Toggle = GetComponentInParent<AttractorToggle>();
 
             if (m_Text == null)
@@ -55,6 +59,13 @@ namespace GravityLab
 
         void OnEnable()
         {
+            if (m_DisplayMode != null)
+            {
+                m_DisplayMode.onToggled.AddListener(Refresh);
+                Refresh(m_DisplayMode.isOn);
+                return;
+            }
+
             if (m_GravityToggle != null)
             {
                 m_GravityToggle.onToggled.AddListener(Refresh);
@@ -73,6 +84,9 @@ namespace GravityLab
 
         void OnDisable()
         {
+            if (m_DisplayMode != null)
+                m_DisplayMode.onToggled.RemoveListener(Refresh);
+
             if (m_GravityToggle != null)
                 m_GravityToggle.onToggled.RemoveListener(Refresh);
 
