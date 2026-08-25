@@ -161,6 +161,9 @@ namespace GravityLab
             m_Line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             m_Line.receiveShadows = false;
             m_Line.material = ResolveMaterial();
+
+            // Under the arrows' 50 and the labels' 100, so the chain sits behind both.
+            m_Line.sortingOrder = 25;
         }
 
         /// <summary>
@@ -201,7 +204,10 @@ namespace GravityLab
 
             if (m_RuntimeMaterial == null)
             {
-                var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
+                // Overlay variant so a chain stays visible through the links it connects.
+                var shader = Shader.Find("GravityLab/Line Overlay")
+                    ?? Shader.Find("Universal Render Pipeline/Unlit")
+                    ?? Shader.Find("Unlit/Color");
                 m_RuntimeMaterial = new Material(shader);
             }
 
