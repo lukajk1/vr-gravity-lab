@@ -18,6 +18,10 @@ namespace GravityLab
         float m_SurfaceRadius = 0.3f;
 
         [SerializeField]
+        [Tooltip("Transform the pull originates from. Leave empty to use this object. Point it at a moving child to have the force follow the visible core rather than the parent.")]
+        Transform m_ForceOrigin;
+
+        [SerializeField]
         [Tooltip("Bodies beyond this distance are ignored")]
         float m_Range = 30f;
 
@@ -66,6 +70,19 @@ namespace GravityLab
         public float maxAcceleration => m_MaxAcceleration;
 
         /// <summary>
+        /// Where the pull actually comes from. Defaults to this object, but can be pointed at
+        /// a child so a moving visual carries the force with it.
+        /// </summary>
+        public Transform forceOrigin
+        {
+            get => m_ForceOrigin != null ? m_ForceOrigin : transform;
+            set => m_ForceOrigin = value;
+        }
+
+        /// <summary>World position the pull originates from.</summary>
+        public Vector3 forcePosition => forceOrigin.position;
+
+        /// <summary>
         /// Whether this source is currently applying force. Disabling the component stops
         /// FixedUpdate, so this is what a toggle switches; visualisers can read it to avoid
         /// drawing a vector for a source that is doing nothing.
@@ -85,7 +102,7 @@ namespace GravityLab
             if (!isActive)
                 return Vector3.zero;
 
-            var offset = transform.position - worldPosition;
+            var offset = forcePosition - worldPosition;
             var distance = offset.magnitude;
 
             if (distance > m_Range || distance < 1e-4f)
@@ -153,9 +170,9 @@ namespace GravityLab
         void OnDrawGizmosSelected()
         {
             Gizmos.color = new Color(0.4f, 0.7f, 1f, 0.6f);
-            Gizmos.DrawWireSphere(transform.position, m_Range);
+            Gizmos.DrawWireSphere(forcePosition, m_Range);
             Gizmos.color = new Color(1f, 0.4f, 0.2f, 0.8f);
-            Gizmos.DrawWireSphere(transform.position, m_SurfaceRadius);
+            Gizmos.DrawWireSphere(forcePosition, m_SurfaceRadius);
         }
     }
 }

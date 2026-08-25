@@ -58,7 +58,7 @@ namespace GravityLab
 
             if (m_ShowAccelerationAtDistance)
             {
-                var samplePoint = m_Attractor.transform.position + Vector3.right * m_SampleDistance;
+                var samplePoint = m_Attractor.forcePosition + Vector3.right * m_SampleDistance;
                 var acceleration = m_Attractor.GetAccelerationAt(samplePoint).magnitude;
                 readout += $"\n{acceleration:0.#} m/s² at {m_SampleDistance:0.#} m";
             }

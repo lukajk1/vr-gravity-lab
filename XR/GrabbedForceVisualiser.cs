@@ -283,7 +283,7 @@ namespace GravityLab
                     continue;
 
                 var caption = m_AttractorArrows.Count > 1 ? $"vector {i + 1}" : "vector";
-                var distance = Vector3.Distance(origin, attractor.transform.position);
+                var distance = Vector3.Distance(origin, attractor.forcePosition);
                 SetLabel(m_AttractorArrows[i], $"{caption}\n{acceleration.magnitude:0.0} m/s²\n@ {distance:0.0} m");
             }
         }
