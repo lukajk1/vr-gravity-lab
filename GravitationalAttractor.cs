@@ -10,16 +10,16 @@ namespace GravityLab
     public class GravitationalAttractor : MonoBehaviour
     {
         [SerializeField]
-        [Tooltip("Strength of the pull. Scales the whole force, like G times the attractor's mass.")]
-        float m_Gravity = 60f;
+        [Tooltip("Acceleration at the attractor's surface, in m/s^2. Earth's surface is 9.81, so 19.62 is 2G.")]
+        float m_SurfaceGravity = 19.62f;
+
+        [SerializeField]
+        [Tooltip("Radius of the attractor's surface, in metres. A Unity sphere primitive is 0.5 at scale 1, so scale 0.6 gives 0.3.")]
+        float m_SurfaceRadius = 0.3f;
 
         [SerializeField]
         [Tooltip("Bodies beyond this distance are ignored")]
         float m_Range = 30f;
-
-        [SerializeField]
-        [Tooltip("Distance floor used in the r^2 term, so the force cannot blow up at the centre")]
-        float m_MinDistance = 1.5f;
 
         [SerializeField]
         [Tooltip("Cap on the acceleration applied per body, as a further stability guard")]
@@ -32,15 +32,36 @@ namespace GravityLab
         readonly List<Rigidbody> m_Bodies = new List<Rigidbody>();
         float m_NextScanTime;
 
-        public float gravity
+        /// <summary>
+        /// Acceleration at the surface, in m/s^2. This is the tuning knob: 9.81 matches
+        /// Earth's surface, so 19.62 is 2G.
+        /// </summary>
+        public float surfaceGravity
         {
-            get => m_Gravity;
-            set => m_Gravity = value;
+            get => m_SurfaceGravity;
+            set => m_SurfaceGravity = value;
         }
+
+        /// <summary>Radius of the surface that <see cref="surfaceGravity"/> refers to, in metres.</summary>
+        public float surfaceRadius
+        {
+            get => m_SurfaceRadius;
+            set => m_SurfaceRadius = value;
+        }
+
+        /// <summary>
+        /// The gravitational parameter (G times mass) in m^3/s^2, derived from the surface
+        /// figures via a = mu / r^2. This is what the inverse-square falloff actually uses.
+        /// </summary>
+        public float gravitationalParameter => m_SurfaceGravity * m_SurfaceRadius * m_SurfaceRadius;
 
         public float range => m_Range;
 
-        public float minDistance => m_MinDistance;
+        /// <summary>
+        /// Distance floor used in the r^2 term. The field is clamped at the surface, so the
+        /// pull peaks there rather than blowing up towards the centre.
+        /// </summary>
+        public float minDistance => m_SurfaceRadius;
 
         public float maxAcceleration => m_MaxAcceleration;
 
@@ -58,8 +79,9 @@ namespace GravityLab
             if (distance > m_Range || distance < 1e-4f)
                 return Vector3.zero;
 
-            var effectiveDistance = Mathf.Max(distance, m_MinDistance);
-            var acceleration = m_Gravity / (effectiveDistance * effectiveDistance);
+            // Clamp at the surface, so the pull peaks there instead of blowing up at the centre.
+            var effectiveDistance = Mathf.Max(distance, m_SurfaceRadius);
+            var acceleration = gravitationalParameter / (effectiveDistance * effectiveDistance);
             acceleration = Mathf.Min(acceleration, m_MaxAcceleration);
 
             return offset / distance * acceleration;
@@ -117,7 +139,7 @@ namespace GravityLab
             Gizmos.color = new Color(0.4f, 0.7f, 1f, 0.6f);
             Gizmos.DrawWireSphere(transform.position, m_Range);
             Gizmos.color = new Color(1f, 0.4f, 0.2f, 0.8f);
-            Gizmos.DrawWireSphere(transform.position, m_MinDistance);
+            Gizmos.DrawWireSphere(transform.position, m_SurfaceRadius);
         }
     }
 }

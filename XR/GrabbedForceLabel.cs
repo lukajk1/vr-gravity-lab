@@ -26,6 +26,18 @@ namespace GravityLab
         Vector3 m_Offset = new Vector3(0f, 0.25f, 0f);
 
         [SerializeField]
+        [Tooltip("Seconds the label takes to catch up to the object. Higher is looser and floatier; zero pins it rigidly.")]
+        float m_FollowSmoothTime = 0.35f;
+
+        [SerializeField]
+        [Tooltip("Cap on how fast the label may travel, in metres per second. Zero or less is uncapped.")]
+        float m_MaxFollowSpeed;
+
+        [SerializeField]
+        [Tooltip("Jump straight to the target on grab instead of flying in from the last position")]
+        bool m_SnapOnGrab = true;
+
+        [SerializeField]
         [Tooltip("Show the resultant of gravity and every attractor as a net line")]
         bool m_ShowNet = true;
 
@@ -42,6 +54,7 @@ namespace GravityLab
         GameObject m_LabelInstance;
         TMP_Text m_Text;
         float m_NextRefreshTime;
+        Vector3 m_FollowVelocity;
 
         readonly List<GravitationalAttractor> m_Attractors = new List<GravitationalAttractor>();
         readonly StringBuilder m_Builder = new StringBuilder();
@@ -86,7 +99,16 @@ namespace GravityLab
             }
 
             if (m_LabelInstance != null)
+            {
                 m_LabelInstance.SetActive(true);
+
+                // Without this the label would sail in from wherever it was left last time.
+                if (m_SnapOnGrab)
+                {
+                    m_LabelInstance.transform.position = m_Rigidbody.worldCenterOfMass + m_Offset;
+                    m_FollowVelocity = Vector3.zero;
+                }
+            }
 
             m_NextRefreshTime = 0f;
         }
@@ -102,7 +124,23 @@ namespace GravityLab
                 return;
 
             var origin = m_Rigidbody.worldCenterOfMass;
-            m_LabelInstance.transform.position = origin + m_Offset;
+            var targetPosition = origin + m_Offset;
+            var labelTransform = m_LabelInstance.transform;
+
+            if (m_FollowSmoothTime > 0f)
+            {
+                // Critically damped follow, so the label trails the object and settles
+                // without overshooting no matter how hard the object is thrown around.
+                labelTransform.position = m_MaxFollowSpeed > 0f
+                    ? Vector3.SmoothDamp(labelTransform.position, targetPosition, ref m_FollowVelocity,
+                        m_FollowSmoothTime, m_MaxFollowSpeed, Time.deltaTime)
+                    : Vector3.SmoothDamp(labelTransform.position, targetPosition, ref m_FollowVelocity,
+                        m_FollowSmoothTime, Mathf.Infinity, Time.deltaTime);
+            }
+            else
+            {
+                labelTransform.position = targetPosition;
+            }
 
             if (m_Text == null)
                 return;

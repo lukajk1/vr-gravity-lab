@@ -52,8 +52,9 @@ namespace GravityLab
 
             m_NextRefreshTime = Time.time + m_RefreshInterval;
 
-            // The tuning value has units of m^3/s^2, so label it as such rather than as g.
-            var readout = $"μ  {m_Attractor.gravity:0.#} m³/s²";
+            // Surface gravity is directly comparable to Earth's 9.81, so show it in g too.
+            var surface = m_Attractor.surfaceGravity;
+            var readout = $"{surface:0.#} m/s² at surface  ({surface / 9.81f:0.##} G)";
 
             if (m_ShowAccelerationAtDistance)
             {

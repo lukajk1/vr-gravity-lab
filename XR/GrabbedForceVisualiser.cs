@@ -6,15 +6,55 @@ using UnityEngine.XR.Interaction.Toolkit.Interactables;
 namespace GravityLab
 {
     /// <summary>
-    /// While this object is held by an XR interactor, draws a line renderer for each force
-    /// that would be acting on it. A held body is kinematic, so nothing is really being
-    /// applied; the vectors are computed from the same maths the physics would use, which
-    /// lets you see what will happen the moment you let go.
+    /// While this object is held by an XR interactor, draws an arrow for each force that
+    /// would be acting on it. A held body is kinematic, so nothing is really being applied;
+    /// the vectors are computed from the same maths the physics would use, which lets you
+    /// see what will happen the moment you let go.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     [RequireComponent(typeof(XRGrabInteractable))]
     public class GrabbedForceVisualiser : MonoBehaviour
     {
+        /// <summary>
+        /// One drawn vector: a shaft plus two barbs forming the arrowhead, with the
+        /// smoothing state that keeps it from snapping around as the object is moved.
+        /// </summary>
+        class Arrow
+        {
+            public LineRenderer shaft;
+            public LineRenderer leftBarb;
+            public LineRenderer rightBarb;
+
+            public Vector3 smoothedDirection;
+            public float smoothedLength;
+            public float lengthVelocity;
+            public bool initialised;
+
+            public void SetEnabled(bool value)
+            {
+                if (shaft != null)
+                    shaft.enabled = value;
+
+                if (leftBarb != null)
+                    leftBarb.enabled = value;
+
+                if (rightBarb != null)
+                    rightBarb.enabled = value;
+            }
+
+            public void Destroy()
+            {
+                if (shaft != null)
+                    Object.Destroy(shaft.gameObject);
+
+                if (leftBarb != null)
+                    Object.Destroy(leftBarb.gameObject);
+
+                if (rightBarb != null)
+                    Object.Destroy(rightBarb.gameObject);
+            }
+        }
+
         [SerializeField]
         [Tooltip("Colour of the constant downward gravity vector. Only drawn when the rigidbody has useGravity enabled.")]
         Color m_GravityColor = new Color(0.2f, 0.6f, 1f);
@@ -40,6 +80,28 @@ namespace GravityLab
         float m_LineWidth = 0.01f;
 
         [SerializeField]
+        [Tooltip("Seconds for the arrow direction to catch up. Higher is smoother and laggier; zero is instant.")]
+        float m_DirectionSmoothTime = 0.15f;
+
+        [SerializeField]
+        [Tooltip("Seconds for the arrow length to catch up as the force changes magnitude")]
+        float m_LengthSmoothTime = 0.2f;
+
+        [SerializeField]
+        [Tooltip("Length of each arrowhead barb, as a fraction of the shaft length")]
+        [Range(0.05f, 0.5f)]
+        float m_HeadLengthFraction = 0.18f;
+
+        [SerializeField]
+        [Tooltip("Longest an arrowhead barb may be, in metres, so long arrows do not grow huge heads")]
+        float m_MaxHeadLength = 0.12f;
+
+        [SerializeField]
+        [Tooltip("Angle between each barb and the shaft, in degrees")]
+        [Range(10f, 60f)]
+        float m_HeadAngle = 25f;
+
+        [SerializeField]
         [Tooltip("Material for the lines. Leave empty to generate an unlit one at runtime.")]
         Material m_LineMaterial;
 
@@ -47,9 +109,8 @@ namespace GravityLab
         XRGrabInteractable m_Grab;
         Material m_RuntimeMaterial;
 
-        // One renderer for gravity, then one per attractor found in the scene.
-        LineRenderer m_GravityLine;
-        readonly List<LineRenderer> m_AttractorLines = new List<LineRenderer>();
+        Arrow m_GravityArrow;
+        readonly List<Arrow> m_AttractorArrows = new List<Arrow>();
         readonly List<GravitationalAttractor> m_Attractors = new List<GravitationalAttractor>();
 
         void Awake()
@@ -68,7 +129,7 @@ namespace GravityLab
         {
             m_Grab.selectEntered.RemoveListener(OnGrabbed);
             m_Grab.selectExited.RemoveListener(OnReleased);
-            SetLinesVisible(false);
+            SetArrowsVisible(false);
         }
 
         void OnDestroy()
@@ -83,13 +144,16 @@ namespace GravityLab
             m_Attractors.Clear();
             m_Attractors.AddRange(FindObjectsByType<GravitationalAttractor>(FindObjectsSortMode.None));
 
-            EnsureLines();
-            SetLinesVisible(true);
+            EnsureArrows();
+
+            // Start from the true values so the first frame does not sweep in from stale state.
+            ResetSmoothing();
+            SetArrowsVisible(true);
         }
 
         void OnReleased(SelectExitEventArgs args)
         {
-            SetLinesVisible(false);
+            SetArrowsVisible(false);
         }
 
         void LateUpdate()
@@ -100,57 +164,119 @@ namespace GravityLab
             var origin = m_Rigidbody.worldCenterOfMass;
 
             // Unity applies gravity only when the body asks for it.
-            if (m_GravityLine != null)
-                DrawVector(m_GravityLine, origin, m_Rigidbody.useGravity ? Physics.gravity : Vector3.zero);
+            if (m_GravityArrow != null)
+                DrawArrow(m_GravityArrow, origin, m_Rigidbody.useGravity ? Physics.gravity : Vector3.zero);
 
-            for (var i = 0; i < m_AttractorLines.Count; i++)
+            for (var i = 0; i < m_AttractorArrows.Count; i++)
             {
                 var attractor = m_Attractors[i];
                 var acceleration = attractor == null
                     ? Vector3.zero
                     : attractor.GetAccelerationAt(origin);
 
-                DrawVector(m_AttractorLines[i], origin, acceleration);
+                DrawArrow(m_AttractorArrows[i], origin, acceleration);
             }
         }
 
         /// <summary>
-        /// Points one line renderer along an acceleration vector, scaled for readability.
-        /// A vector below the minimum length hides the renderer rather than drawing a dot.
+        /// Lays out one arrow along an acceleration vector, scaled for readability. Direction
+        /// and length are smoothed separately so the arrow swings rather than snaps while the
+        /// object is being waved about. A vector below the minimum length hides the arrow.
         /// </summary>
-        void DrawVector(LineRenderer line, Vector3 origin, Vector3 acceleration)
+        void DrawArrow(Arrow arrow, Vector3 origin, Vector3 acceleration)
         {
-            var length = acceleration.magnitude * m_MetresPerUnit;
+            var rawLength = Mathf.Min(acceleration.magnitude * m_MetresPerUnit, m_MaxDrawLength);
+            var rawDirection = acceleration.sqrMagnitude > 1e-8f
+                ? acceleration.normalized
+                : arrow.smoothedDirection;
 
-            if (length < m_MinDrawLength)
+            if (!arrow.initialised)
             {
-                line.enabled = false;
+                arrow.smoothedDirection = rawDirection;
+                arrow.smoothedLength = rawLength;
+                arrow.lengthVelocity = 0f;
+                arrow.initialised = true;
+            }
+            else
+            {
+                // Slerp keeps the tip sweeping along an arc instead of cutting across.
+                arrow.smoothedDirection = m_DirectionSmoothTime > 0f
+                    ? Vector3.Slerp(arrow.smoothedDirection, rawDirection,
+                        1f - Mathf.Exp(-Time.deltaTime / m_DirectionSmoothTime)).normalized
+                    : rawDirection;
+
+                arrow.smoothedLength = m_LengthSmoothTime > 0f
+                    ? Mathf.SmoothDamp(arrow.smoothedLength, rawLength, ref arrow.lengthVelocity,
+                        m_LengthSmoothTime, Mathf.Infinity, Time.deltaTime)
+                    : rawLength;
+            }
+
+            if (arrow.smoothedLength < m_MinDrawLength || arrow.smoothedDirection.sqrMagnitude < 1e-8f)
+            {
+                arrow.SetEnabled(false);
                 return;
             }
 
-            length = Mathf.Min(length, m_MaxDrawLength);
+            arrow.SetEnabled(true);
 
-            line.enabled = true;
-            line.SetPosition(0, origin);
-            line.SetPosition(1, origin + acceleration.normalized * length);
+            var direction = arrow.smoothedDirection;
+            var tip = origin + direction * arrow.smoothedLength;
+
+            arrow.shaft.SetPosition(0, origin);
+            arrow.shaft.SetPosition(1, tip);
+
+            // Barbs sweep back from the tip, splayed either side of the shaft. Any axis
+            // perpendicular to the shaft works; pick the more stable of two candidates so
+            // the head does not flip when the arrow points near world up.
+            var reference = Mathf.Abs(Vector3.Dot(direction, Vector3.up)) > 0.95f
+                ? Vector3.right
+                : Vector3.up;
+            var side = Vector3.Normalize(Vector3.Cross(direction, reference));
+
+            var headLength = Mathf.Min(arrow.smoothedLength * m_HeadLengthFraction, m_MaxHeadLength);
+            var back = -direction * Mathf.Cos(m_HeadAngle * Mathf.Deg2Rad) * headLength;
+            var out1 = side * Mathf.Sin(m_HeadAngle * Mathf.Deg2Rad) * headLength;
+
+            arrow.leftBarb.SetPosition(0, tip);
+            arrow.leftBarb.SetPosition(1, tip + back + out1);
+
+            arrow.rightBarb.SetPosition(0, tip);
+            arrow.rightBarb.SetPosition(1, tip + back - out1);
         }
 
-        void EnsureLines()
+        void ResetSmoothing()
         {
-            if (m_GravityLine == null)
-                m_GravityLine = CreateLine("Gravity Vector", m_GravityColor);
+            if (m_GravityArrow != null)
+                m_GravityArrow.initialised = false;
+
+            foreach (var arrow in m_AttractorArrows)
+                arrow.initialised = false;
+        }
+
+        void EnsureArrows()
+        {
+            if (m_GravityArrow == null)
+                m_GravityArrow = CreateArrow("Gravity Vector", m_GravityColor);
 
             // Grow or shrink the pool to match the attractors present.
-            while (m_AttractorLines.Count < m_Attractors.Count)
-                m_AttractorLines.Add(CreateLine("Attractor Vector " + m_AttractorLines.Count, m_AttractorColor));
+            while (m_AttractorArrows.Count < m_Attractors.Count)
+                m_AttractorArrows.Add(CreateArrow("Attractor Vector " + m_AttractorArrows.Count, m_AttractorColor));
 
-            for (var i = m_AttractorLines.Count - 1; i >= m_Attractors.Count; i--)
+            for (var i = m_AttractorArrows.Count - 1; i >= m_Attractors.Count; i--)
             {
-                if (m_AttractorLines[i] != null)
-                    Destroy(m_AttractorLines[i].gameObject);
-
-                m_AttractorLines.RemoveAt(i);
+                m_AttractorArrows[i].Destroy();
+                m_AttractorArrows.RemoveAt(i);
             }
+        }
+
+        Arrow CreateArrow(string arrowName, Color color)
+        {
+            return new Arrow
+            {
+                shaft = CreateLine(arrowName + " Shaft", color),
+                leftBarb = CreateLine(arrowName + " Barb L", color),
+                rightBarb = CreateLine(arrowName + " Barb R", color),
+            };
         }
 
         LineRenderer CreateLine(string lineName, Color color)
@@ -191,16 +317,13 @@ namespace GravityLab
             return m_RuntimeMaterial;
         }
 
-        void SetLinesVisible(bool visible)
+        void SetArrowsVisible(bool visible)
         {
-            if (m_GravityLine != null)
-                m_GravityLine.enabled = visible;
+            if (m_GravityArrow != null)
+                m_GravityArrow.SetEnabled(visible);
 
-            foreach (var line in m_AttractorLines)
-            {
-                if (line != null)
-                    line.enabled = visible;
-            }
+            foreach (var arrow in m_AttractorArrows)
+                arrow.SetEnabled(visible);
         }
     }
 }
