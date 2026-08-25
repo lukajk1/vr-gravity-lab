@@ -154,6 +154,7 @@ namespace GravityLab
         Material m_RuntimeMaterial;
 
         float m_NextLabelRefreshTime;
+        bool m_ArrowsVisible;
 
         Arrow m_GravityArrow;
         readonly List<Arrow> m_AttractorArrows = new List<Arrow>();
@@ -184,7 +185,36 @@ namespace GravityLab
                 Destroy(m_RuntimeMaterial);
         }
 
+        /// <summary>
+        /// Vectors normally appear only while the object is held, but the global display mode
+        /// overrides that to show every object at once.
+        /// </summary>
+        bool shouldDisplay => m_Grab.isSelected || ForceVectorDisplayMode.showAll;
+
         void OnGrabbed(SelectEnterEventArgs args)
+        {
+            Rebuild();
+            m_ArrowsVisible = true;
+
+            if (m_LogArrowState)
+                LogArrowState();
+        }
+
+        void OnReleased(SelectExitEventArgs args)
+        {
+            // Stay visible when the global mode is on; LateUpdate hides them otherwise.
+            if (ForceVectorDisplayMode.showAll)
+                return;
+
+            SetArrowsVisible(false);
+            m_ArrowsVisible = false;
+        }
+
+        /// <summary>
+        /// Builds the arrows and resets their smoothing, for either a fresh grab or the
+        /// global display mode switching on.
+        /// </summary>
+        void Rebuild()
         {
             // Attractors can be added or removed between grabs, so rebuild each time.
             m_Attractors.Clear();
@@ -195,20 +225,27 @@ namespace GravityLab
             // Start from the true values so the first frame does not sweep in from stale state.
             ResetSmoothing();
             SetArrowsVisible(true);
-
-            if (m_LogArrowState)
-                LogArrowState();
-        }
-
-        void OnReleased(SelectExitEventArgs args)
-        {
-            SetArrowsVisible(false);
         }
 
         void LateUpdate()
         {
-            if (!m_Grab.isSelected)
+            if (!shouldDisplay)
+            {
+                if (m_ArrowsVisible)
+                {
+                    SetArrowsVisible(false);
+                    m_ArrowsVisible = false;
+                }
+
                 return;
+            }
+
+            // The global mode can turn on without a grab, so the arrows may not exist yet.
+            if (!m_ArrowsVisible)
+            {
+                Rebuild();
+                m_ArrowsVisible = true;
+            }
 
             var origin = m_Rigidbody.worldCenterOfMass;
             var refresh = m_LabelRefreshInterval <= 0f || Time.time >= m_NextLabelRefreshTime;
@@ -229,23 +266,23 @@ namespace GravityLab
             for (var i = 0; i < m_AttractorArrows.Count; i++)
             {
                 var attractor = m_Attractors[i];
-                var acceleration = attractor == null
-                    ? Vector3.zero
-                    : attractor.GetAccelerationAt(origin);
+
+                // A switched-off source contributes nothing, so drop its arrow and label
+                // entirely rather than drawing a zero-length stub.
+                if (attractor == null || !attractor.isActive)
+                {
+                    m_AttractorArrows[i].SetEnabled(false);
+                    continue;
+                }
+
+                var acceleration = attractor.GetAccelerationAt(origin);
 
                 DrawArrow(m_AttractorArrows[i], origin, acceleration);
 
                 if (!refresh)
                     continue;
 
-                var caption = m_AttractorArrows.Count > 1 ? $"attractor {i + 1}" : "attractor";
-
-                if (attractor == null)
-                {
-                    SetLabel(m_AttractorArrows[i], caption);
-                    continue;
-                }
-
+                var caption = m_AttractorArrows.Count > 1 ? $"vector {i + 1}" : "vector";
                 var distance = Vector3.Distance(origin, attractor.transform.position);
                 SetLabel(m_AttractorArrows[i], $"{caption}\n{acceleration.magnitude:0.0} m/s²\n@ {distance:0.0} m");
             }

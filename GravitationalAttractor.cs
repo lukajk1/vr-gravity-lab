@@ -66,6 +66,13 @@ namespace GravityLab
         public float maxAcceleration => m_MaxAcceleration;
 
         /// <summary>
+        /// Whether this source is currently applying force. Disabling the component stops
+        /// FixedUpdate, so this is what a toggle switches; visualisers can read it to avoid
+        /// drawing a vector for a source that is doing nothing.
+        /// </summary>
+        public bool isActive => isActiveAndEnabled;
+
+        /// <summary>
         /// Acceleration this attractor would apply to a body at the given world position,
         /// using the same maths as <see cref="FixedUpdate"/>. Returns zero when the point is
         /// out of range. Lets callers such as force visualisers report the real value
@@ -73,6 +80,11 @@ namespace GravityLab
         /// </summary>
         public Vector3 GetAccelerationAt(Vector3 worldPosition)
         {
+            // An inactive source applies nothing, so report nothing rather than leaving
+            // callers to remember to check separately.
+            if (!isActive)
+                return Vector3.zero;
+
             var offset = transform.position - worldPosition;
             var distance = offset.magnitude;
 

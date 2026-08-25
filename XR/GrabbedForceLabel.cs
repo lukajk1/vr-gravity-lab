@@ -83,7 +83,22 @@ namespace GravityLab
                 Destroy(m_LabelInstance);
         }
 
+        /// <summary>
+        /// The readout normally appears only while the object is held, but the global display
+        /// mode overrides that to show every object at once.
+        /// </summary>
+        bool shouldDisplay => m_Grab.isSelected || ForceVectorDisplayMode.showAll;
+
         void OnGrabbed(SelectEnterEventArgs args)
+        {
+            ShowLabel();
+        }
+
+        /// <summary>
+        /// Spawns the label if needed and snaps it into place, for either a fresh grab or the
+        /// global display mode switching on.
+        /// </summary>
+        void ShowLabel()
         {
             // Attractors can come and go between grabs, so rebuild the list each time.
             m_Attractors.Clear();
@@ -114,12 +129,28 @@ namespace GravityLab
 
         void OnReleased(SelectExitEventArgs args)
         {
+            // Stay visible when the global mode is on; LateUpdate hides it otherwise.
+            if (ForceVectorDisplayMode.showAll)
+                return;
+
             HideLabel();
         }
 
         void LateUpdate()
         {
-            if (!m_Grab.isSelected || m_LabelInstance == null)
+            if (!shouldDisplay)
+            {
+                if (m_LabelInstance != null && m_LabelInstance.activeSelf)
+                    HideLabel();
+
+                return;
+            }
+
+            // The global mode can turn on without a grab, so the label may not exist yet.
+            if (m_LabelInstance == null || !m_LabelInstance.activeSelf)
+                ShowLabel();
+
+            if (m_LabelInstance == null)
                 return;
 
             var origin = m_Rigidbody.worldCenterOfMass;
