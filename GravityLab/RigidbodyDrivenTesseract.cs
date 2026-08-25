@@ -3,8 +3,9 @@ using UnityEngine;
 namespace GravityLab
 {
     /// <summary>
-    /// Feeds a rigidbody's rotation into a <see cref="TesseractSlice"/>, so tumbling the
-    /// physical object turns the 4D cube it contains. The body's three Euler angles drive the
+    /// Feeds a rigidbody's rotation into any <see cref="IFourDimensionalRotatable"/>, so
+    /// tumbling the physical object turns the 4D shape it contains, whether that is a
+    /// cross-section or a projection. The body's three Euler angles drive the
     /// three ordinary planes; each also bleeds into a plane involving w, so a purely 3D spin
     /// still reshapes the cross-section instead of merely re-orienting it.
     /// </summary>
@@ -13,7 +14,6 @@ namespace GravityLab
     /// that cannot do is change which 3D shape the section is, since that depends on the
     /// tesseract's orientation in four dimensions. This maps one onto the other.
     /// </remarks>
-    [RequireComponent(typeof(TesseractSlice))]
     public class RigidbodyDrivenTesseract : MonoBehaviour
     {
         [SerializeField]
@@ -41,7 +41,7 @@ namespace GravityLab
         [Tooltip("Also drive the slice's own idle spin. Turn off to let the body be the only source of rotation.")]
         bool m_SuppressIdleSpin = true;
 
-        TesseractSlice m_Slice;
+        IFourDimensionalRotatable m_Slice;
 
         // Euler angles wrap at 360, so a body turning smoothly past that point reports a jump
         // from 359 to 0. These accumulate the unwrapped angle instead, keeping the fed value
@@ -56,7 +56,8 @@ namespace GravityLab
 
         void Awake()
         {
-            m_Slice = GetComponent<TesseractSlice>();
+            // Either a slice or a projection will do, so long as it can be turned in 4D.
+            m_Slice = GetComponent<IFourDimensionalRotatable>();
 
             if (m_Body == null)
                 m_Body = GetComponentInParent<Rigidbody>();

@@ -21,7 +21,7 @@ namespace GravityLab
     /// </remarks>
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
-    public class TesseractSlice : MonoBehaviour
+    public class TesseractSlice : MonoBehaviour, IFourDimensionalRotatable
     {
         // The six planes a 4D rotation can happen in. XY, XZ and YZ are the familiar 3D ones;
         // XW, YW and ZW sweep geometry through the fourth axis and reshape the slice.

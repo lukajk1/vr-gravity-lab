@@ -76,7 +76,32 @@ namespace GravityLab
             if (movementType != MovementType.Kinematic)
                 movementType = MovementType.Kinematic;
 
+            var body = GetComponent<Rigidbody>();
+
+            if (body != null)
+            {
+                // Belt and braces: a non-kinematic handle can be shoved off the rail by any
+                // contact, and nothing about this control wants physics driving it.
+                body.isKinematic = true;
+                body.useGravity = false;
+            }
+
             ApplyValueToTransform();
+        }
+
+        protected override void OnSelectExited(SelectExitEventArgs args)
+        {
+            base.OnSelectExited(args);
+
+            // XRI applies its detach handling during the base call, so re-pin afterwards.
+            SnapToTrack();
+        }
+
+        void LateUpdate()
+        {
+            // Last line of defence, after every other system has had its turn this frame.
+            if (!isSelected)
+                ApplyValueToTransform();
         }
 
         public override void ProcessInteractable(XRInteractionUpdateOrder.UpdatePhase updatePhase)
@@ -85,11 +110,40 @@ namespace GravityLab
 
             // Dynamic phase is where XRI has already applied the hand's pose, so this is the
             // point at which to overwrite it with the constrained one.
-            if (updatePhase != XRInteractionUpdateOrder.UpdatePhase.Dynamic || !isSelected)
+            if (updatePhase != XRInteractionUpdateOrder.UpdatePhase.Dynamic)
                 return;
 
-            var interactor = interactorsSelecting[0];
-            SetValue(ProjectToValue(interactor.GetAttachTransform(this).position));
+            if (isSelected)
+            {
+                var interactor = interactorsSelecting[0];
+                SetValue(ProjectToValue(interactor.GetAttachTransform(this).position));
+                return;
+            }
+
+            // Released handles are re-pinned too. Without this the constraint stops the
+            // moment you let go, and anything that nudges the handle afterwards - a residual
+            // velocity, a collision, a physics hand - slides it off the rail for good.
+            ApplyValueToTransform();
+        }
+
+        /// <summary>
+        /// Puts the handle back on its rail and kills any motion, whatever has happened to it.
+        /// Cheap enough to run unconditionally, and it means no code path can leave the handle
+        /// stranded off the track.
+        /// </summary>
+        public void SnapToTrack()
+        {
+            ApplyValueToTransform();
+
+            var body = GetComponent<Rigidbody>();
+
+            if (body == null)
+                return;
+
+            // A kinematic body ignores these, but the handle may not be kinematic yet during
+            // a detach, and a leftover velocity is exactly what carries it away.
+            body.linearVelocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
         }
 
         /// <summary>
