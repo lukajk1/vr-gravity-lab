@@ -9,9 +9,8 @@ namespace GravityLab
 {
     /// <summary>
     /// While this object is held, shows a worldspace label that tracks it and reports the
-    /// accelerations acting on it. A held body is kinematic so nothing is really applied;
-    /// these are the values that resume the moment it is released, matching the vectors
-    /// drawn by <see cref="GrabbedForceVisualiser"/>.
+    /// object's own properties plus the net acceleration on it. The per-force breakdown
+    /// lives on the arrow heads instead, drawn by <see cref="GrabbedForceVisualiser"/>.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     [RequireComponent(typeof(XRGrabInteractable))]
@@ -169,33 +168,18 @@ namespace GravityLab
 
             // Unity only applies gravity when the body asks for it.
             if (m_Rigidbody.useGravity)
+                net += Physics.gravity;
+
+            foreach (var attractor in m_Attractors)
             {
-                var gravity = Physics.gravity;
-                net += gravity;
-                m_Builder.Append($"\ngravity      {gravity.magnitude:0.0} m/s²");
-            }
-            else
-            {
-                m_Builder.Append("\ngravity      off");
+                if (attractor != null)
+                    net += attractor.GetAccelerationAt(origin);
             }
 
-            for (var i = 0; i < m_Attractors.Count; i++)
-            {
-                var attractor = m_Attractors[i];
-
-                if (attractor == null)
-                    continue;
-
-                var acceleration = attractor.GetAccelerationAt(origin);
-                net += acceleration;
-
-                var distance = Vector3.Distance(origin, attractor.transform.position);
-                var label = m_Attractors.Count > 1 ? $"attractor {i + 1}" : "attractor";
-                m_Builder.Append($"\n{label}   {acceleration.magnitude:0.0} m/s²  @ {distance:0.0} m");
-            }
-
+            // Each force is spelled out on its own arrow head, so only the resultant is
+            // worth repeating here.
             if (m_ShowNet)
-                m_Builder.Append($"\nnet          {net.magnitude:0.0} m/s²");
+                m_Builder.Append($"\nnet  {net.magnitude:0.0} m/s²");
 
             return m_Builder.ToString();
         }

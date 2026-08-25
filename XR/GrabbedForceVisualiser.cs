@@ -25,6 +25,11 @@ namespace GravityLab
             public LineRenderer leftBarb;
             public LineRenderer rightBarb;
 
+            public GameObject label;
+            public TMPro.TMP_Text text;
+            public Vector3 labelVelocity;
+            public bool labelPlaced;
+
             public Vector3 smoothedDirection;
             public float smoothedLength;
             public float lengthVelocity;
@@ -48,6 +53,9 @@ namespace GravityLab
 
                 if (rightBarb != null)
                     rightBarb.enabled = value;
+
+                if (label != null)
+                    label.SetActive(value);
             }
 
             public void Destroy()
@@ -60,6 +68,9 @@ namespace GravityLab
 
                 if (rightBarb != null)
                     Object.Destroy(rightBarb.gameObject);
+
+                if (label != null)
+                    Object.Destroy(label);
             }
         }
 
@@ -117,9 +128,32 @@ namespace GravityLab
         [Tooltip("Material for the lines. Leave empty to generate an unlit one at runtime.")]
         Material m_LineMaterial;
 
+        [Header("Arrow labels")]
+        [SerializeField]
+        [Tooltip("Label prefab pinned to each arrow's head. Needs a TMP_Text in its hierarchy.")]
+        GameObject m_LabelPrefab;
+
+        [SerializeField]
+        [Tooltip("Offset from the arrow tip where its label sits, in metres")]
+        Vector3 m_LabelOffset = new Vector3(0f, 0.12f, 0f);
+
+        [SerializeField]
+        [Tooltip("Seconds the label takes to catch up to the arrow head. Matches the object labels' generous damping.")]
+        float m_LabelSmoothTime = 0.35f;
+
+        [SerializeField]
+        [Tooltip("Seconds between label text refreshes. Zero updates every frame.")]
+        float m_LabelRefreshInterval = 0.05f;
+
+        [SerializeField]
+        [Tooltip("Log each arrow's computed state once per grab, to diagnose an arrow that will not appear")]
+        bool m_LogArrowState;
+
         Rigidbody m_Rigidbody;
         XRGrabInteractable m_Grab;
         Material m_RuntimeMaterial;
+
+        float m_NextLabelRefreshTime;
 
         Arrow m_GravityArrow;
         readonly List<Arrow> m_AttractorArrows = new List<Arrow>();
@@ -161,6 +195,9 @@ namespace GravityLab
             // Start from the true values so the first frame does not sweep in from stale state.
             ResetSmoothing();
             SetArrowsVisible(true);
+
+            if (m_LogArrowState)
+                LogArrowState();
         }
 
         void OnReleased(SelectExitEventArgs args)
@@ -174,10 +211,20 @@ namespace GravityLab
                 return;
 
             var origin = m_Rigidbody.worldCenterOfMass;
+            var refresh = m_LabelRefreshInterval <= 0f || Time.time >= m_NextLabelRefreshTime;
+
+            if (refresh)
+                m_NextLabelRefreshTime = Time.time + m_LabelRefreshInterval;
 
             // Unity applies gravity only when the body asks for it.
             if (m_GravityArrow != null)
-                DrawArrow(m_GravityArrow, origin, m_Rigidbody.useGravity ? Physics.gravity : Vector3.zero);
+            {
+                var gravity = m_Rigidbody.useGravity ? Physics.gravity : Vector3.zero;
+                DrawArrow(m_GravityArrow, origin, gravity);
+
+                if (refresh)
+                    SetLabel(m_GravityArrow, $"gravity\n{gravity.magnitude:0.0} m/s²");
+            }
 
             for (var i = 0; i < m_AttractorArrows.Count; i++)
             {
@@ -187,6 +234,20 @@ namespace GravityLab
                     : attractor.GetAccelerationAt(origin);
 
                 DrawArrow(m_AttractorArrows[i], origin, acceleration);
+
+                if (!refresh)
+                    continue;
+
+                var caption = m_AttractorArrows.Count > 1 ? $"attractor {i + 1}" : "attractor";
+
+                if (attractor == null)
+                {
+                    SetLabel(m_AttractorArrows[i], caption);
+                    continue;
+                }
+
+                var distance = Vector3.Distance(origin, attractor.transform.position);
+                SetLabel(m_AttractorArrows[i], $"{caption}\n{acceleration.magnitude:0.0} m/s²\n@ {distance:0.0} m");
             }
         }
 
@@ -207,10 +268,20 @@ namespace GravityLab
                 arrow.smoothedDirection = rawDirection;
                 arrow.smoothedLength = rawLength;
                 arrow.lengthVelocity = 0f;
+                arrow.smoothedOrigin = origin;
+                arrow.originVelocity = Vector3.zero;
+                arrow.barbAxis = Vector3.zero;
                 arrow.initialised = true;
             }
             else
             {
+                // The tail follows the body rather than being welded to it, so a tumbling
+                // object does not transmit its jitter into the whole arrow.
+                arrow.smoothedOrigin = m_OriginSmoothTime > 0f
+                    ? Vector3.SmoothDamp(arrow.smoothedOrigin, origin, ref arrow.originVelocity,
+                        m_OriginSmoothTime, Mathf.Infinity, Time.deltaTime)
+                    : origin;
+
                 // Slerp keeps the tip sweeping along an arc instead of cutting across.
                 arrow.smoothedDirection = m_DirectionSmoothTime > 0f
                     ? Vector3.Slerp(arrow.smoothedDirection, rawDirection,
@@ -232,18 +303,28 @@ namespace GravityLab
             arrow.SetEnabled(true);
 
             var direction = arrow.smoothedDirection;
-            var tip = origin + direction * arrow.smoothedLength;
+            var start = arrow.smoothedOrigin;
+            var tip = start + direction * arrow.smoothedLength;
 
-            arrow.shaft.SetPosition(0, origin);
+            arrow.shaft.SetPosition(0, start);
             arrow.shaft.SetPosition(1, tip);
 
             // Barbs sweep back from the tip, splayed either side of the shaft. Any axis
-            // perpendicular to the shaft works; pick the more stable of two candidates so
-            // the head does not flip when the arrow points near world up.
-            var reference = Mathf.Abs(Vector3.Dot(direction, Vector3.up)) > 0.95f
-                ? Vector3.right
-                : Vector3.up;
-            var side = Vector3.Normalize(Vector3.Cross(direction, reference));
+            // perpendicular to the shaft works, so carry the previous frame's axis forward
+            // and only re-derive it when the shaft has swung too close to it. Switching on a
+            // hard threshold instead would spin the arrowhead as the arrow passed vertical.
+            var side = Vector3.ProjectOnPlane(arrow.barbAxis, direction);
+
+            if (side.sqrMagnitude < 1e-6f)
+            {
+                var reference = Mathf.Abs(Vector3.Dot(direction, Vector3.up)) > 0.95f
+                    ? Vector3.right
+                    : Vector3.up;
+                side = Vector3.Cross(direction, reference);
+            }
+
+            side = side.normalized;
+            arrow.barbAxis = side;
 
             var headLength = Mathf.Min(arrow.smoothedLength * m_HeadLengthFraction, m_MaxHeadLength);
             var back = -direction * Mathf.Cos(m_HeadAngle * Mathf.Deg2Rad) * headLength;
@@ -254,15 +335,80 @@ namespace GravityLab
 
             arrow.rightBarb.SetPosition(0, tip);
             arrow.rightBarb.SetPosition(1, tip + back - out1);
+
+            PlaceLabel(arrow, tip);
+        }
+
+        /// <summary>
+        /// Eases the arrow's label toward its head. The arrow itself is already smoothed, so
+        /// this is mostly to keep the text from tracking every twitch of the tip.
+        /// </summary>
+        void PlaceLabel(Arrow arrow, Vector3 tip)
+        {
+            if (arrow.label == null)
+                return;
+
+            var target = tip + m_LabelOffset;
+            var labelTransform = arrow.label.transform;
+
+            // First frame after a grab snaps, so the label does not fly in from the last one.
+            if (!arrow.labelPlaced || m_LabelSmoothTime <= 0f)
+            {
+                labelTransform.position = target;
+                arrow.labelVelocity = Vector3.zero;
+                arrow.labelPlaced = true;
+                return;
+            }
+
+            labelTransform.position = Vector3.SmoothDamp(labelTransform.position, target,
+                ref arrow.labelVelocity, m_LabelSmoothTime, Mathf.Infinity, Time.deltaTime);
+        }
+
+        void SetLabel(Arrow arrow, string value)
+        {
+            if (arrow.text != null)
+                arrow.text.text = value;
+        }
+
+        /// <summary>
+        /// Reports what each arrow was actually given, so an arrow that never appears can be
+        /// traced to its source: no renderer, a zero vector, or a length below the cull.
+        /// </summary>
+        void LogArrowState()
+        {
+            var origin = m_Rigidbody.worldCenterOfMass;
+            var gravity = m_Rigidbody.useGravity ? Physics.gravity : Vector3.zero;
+
+            Debug.Log($"[{name}] useGravity={m_Rigidbody.useGravity} gravity={gravity} " +
+                $"drawLen={Mathf.Min(gravity.magnitude * m_MetresPerUnit, m_MaxDrawLength):F4} " +
+                $"minDraw={m_MinDrawLength} " +
+                $"shaft={(m_GravityArrow?.shaft != null ? "ok" : "NULL")} " +
+                $"enabled={(m_GravityArrow?.shaft != null && m_GravityArrow.shaft.enabled)}", this);
+
+            for (var i = 0; i < m_AttractorArrows.Count; i++)
+            {
+                var a = m_Attractors[i] == null ? Vector3.zero : m_Attractors[i].GetAccelerationAt(origin);
+                Debug.Log($"[{name}] attractor {i} accel={a.magnitude:F3} " +
+                    $"drawLen={Mathf.Min(a.magnitude * m_MetresPerUnit, m_MaxDrawLength):F4} " +
+                    $"shaft={(m_AttractorArrows[i].shaft != null ? "ok" : "NULL")}", this);
+            }
         }
 
         void ResetSmoothing()
         {
             if (m_GravityArrow != null)
+            {
                 m_GravityArrow.initialised = false;
+                m_GravityArrow.labelPlaced = false;
+            }
 
             foreach (var arrow in m_AttractorArrows)
+            {
                 arrow.initialised = false;
+                arrow.labelPlaced = false;
+            }
+
+            m_NextLabelRefreshTime = 0f;
         }
 
         void EnsureArrows()
@@ -283,12 +429,24 @@ namespace GravityLab
 
         Arrow CreateArrow(string arrowName, Color color)
         {
-            return new Arrow
+            var arrow = new Arrow
             {
                 shaft = CreateLine(arrowName + " Shaft", color),
                 leftBarb = CreateLine(arrowName + " Barb L", color),
                 rightBarb = CreateLine(arrowName + " Barb R", color),
             };
+
+            if (m_LabelPrefab != null)
+            {
+                // Parented to the scene root so the label keeps world scale and does not
+                // inherit the held object's rotation.
+                arrow.label = Instantiate(m_LabelPrefab);
+                arrow.label.name = arrowName + " Label";
+                arrow.text = arrow.label.GetComponentInChildren<TMPro.TMP_Text>();
+                arrow.label.SetActive(false);
+            }
+
+            return arrow;
         }
 
         LineRenderer CreateLine(string lineName, Color color)

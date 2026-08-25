@@ -4,9 +4,12 @@ using UnityEngine.Events;
 namespace GravityLab
 {
     /// <summary>
-    /// Switches Unity's global gravity between its normal downward pull and zero. With it
-    /// off the attractor becomes the only force acting, so bodies orbit instead of being
-    /// dragged to the floor.
+    /// Switches Unity's global gravity on and off. With it off the attractor becomes the only
+    /// force acting, so bodies orbit instead of being dragged to the floor.
+    ///
+    /// This is the final say on whether gravity applies. When a GlobalGravityStrengthControl
+    /// is present it owns the magnitude and watches this toggle, so the two do not both write
+    /// Physics.gravity; leave m_DriveGravityDirectly off in that setup.
     /// </summary>
     /// <remarks>
     /// Physics.gravity is a project-wide setting rather than a per-scene one, so this
@@ -16,8 +19,12 @@ namespace GravityLab
     public class GlobalGravityToggle : MonoBehaviour
     {
         [SerializeField]
-        [Tooltip("Gravity applied when switched on. Defaults to Unity's usual downward pull.")]
+        [Tooltip("Gravity applied when switched on. Ignored when a strength control owns the magnitude.")]
         Vector3 m_GravityWhenOn = new Vector3(0f, -9.81f, 0f);
+
+        [SerializeField]
+        [Tooltip("Write Physics.gravity from this toggle. Turn OFF when a GlobalGravityStrengthControl is gated on this toggle, so the slider's value is not overwritten.")]
+        bool m_DriveGravityDirectly = true;
 
         [SerializeField]
         [Tooltip("State to apply when the scene loads")]
@@ -72,7 +79,11 @@ namespace GravityLab
         public void SetEnabled(bool value)
         {
             m_IsOn = value;
-            Physics.gravity = value ? m_GravityWhenOn : Vector3.zero;
+
+            // A strength control, when present, is the single writer of Physics.gravity and
+            // reacts to onToggled below. Writing here as well would clobber its value.
+            if (m_DriveGravityDirectly)
+                Physics.gravity = value ? m_GravityWhenOn : Vector3.zero;
 
             if (m_WakeBodiesOnChange)
                 WakeBodies();
